@@ -19,6 +19,36 @@ KEEP_JOBS = {
 }
 
 
+def find_job_blocks(lines):
+    """Return list of (start_index, end_index, job_name) for top-level jobs."""
+    jobs_start = None
+    for idx, line in enumerate(lines):
+        if line.strip() == "jobs:":
+            jobs_start = idx
+            break
+    if jobs_start is None:
+        raise RuntimeError("Could not find jobs: section")
+
+    blocks = []
+    i = jobs_start + 1
+    while i < len(lines):
+        m = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", lines[i])
+        if m:
+            job_name = m.group(1)
+            start = i
+            # Find end of this job block (next top-level job or end of file).
+            j = i + 1
+            while j < len(lines):
+                if re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", lines[j]):
+                    break
+                j += 1
+            blocks.append((start, j, job_name))
+            i = j
+        else:
+            i += 1
+    return blocks
+
+
 def main():
     text = WORKFLOW.read_text(encoding="utf-8")
 
@@ -31,39 +61,21 @@ def main():
 """
     text = text.replace(marker, marker + PATCH_STEP)
 
-    # 2. Skip all jobs except the Windows-related ones.
     lines = text.splitlines(keepends=True)
-    # Find the start of the jobs: section.
-    jobs_start = None
-    for idx, line in enumerate(lines):
-        if line.strip() == "jobs:":
-            jobs_start = idx
-            break
-    if jobs_start is None:
-        raise RuntimeError("Could not find jobs: section")
+    blocks = find_job_blocks(lines)
 
-    i = jobs_start + 1
-    while i < len(lines):
-        line = lines[i]
-        # Job names are top-level keys under jobs, indented by 2 spaces, ending with colon.
-        m = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
-        if m and i + 1 < len(lines):
-            job_name = m.group(1)
-            # Ensure this is actually a job definition by looking at the next non-empty line.
-            j = i + 1
-            while j < len(lines) and lines[j].strip() == "":
-                j += 1
-            if j < len(lines) and lines[j].startswith("    ") and not lines[j].startswith("      "):
-                if job_name not in KEEP_JOBS:
-                    # Check if next property line is already an 'if:'.
-                    if re.match(r"^    if:\s*", lines[j]):
-                        # Replace existing condition with false.
-                        lines[j] = "    if: false\n"
-                    else:
-                        # Insert if: false right after job name line.
-                        lines.insert(i + 1, "    if: false\n")
-                        i += 1
-        i += 1
+    # Process skipped jobs from bottom to top so line indices remain valid.
+    for start, end, job_name in reversed(blocks):
+        if job_name in KEEP_JOBS:
+            continue
+        # Remove any existing top-level if: lines within this job block.
+        new_block = [lines[start]]  # job name line
+        new_block.append("    if: false\n")
+        for k in range(start + 1, end):
+            if re.match(r"^    if:\s*", lines[k]):
+                continue
+            new_block.append(lines[k])
+        lines[start:end] = new_block
 
     WORKFLOW.write_text("".join(lines), encoding="utf-8")
     print(f"Prepared {WORKFLOW}")
