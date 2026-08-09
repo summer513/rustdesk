@@ -49,13 +49,20 @@ def main():
         m = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
         if m and i + 1 < len(lines):
             job_name = m.group(1)
-            next_line = lines[i + 1]
-            # Make sure next line is a job property (4-space indent), not a nested mapping key.
-            if next_line.startswith("    ") and not next_line.startswith("      "):
+            # Ensure this is actually a job definition by looking at the next non-empty line.
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            if j < len(lines) and lines[j].startswith("    ") and not lines[j].startswith("      "):
                 if job_name not in KEEP_JOBS:
-                    # Insert if: false with 4-space indent right after job name line.
-                    lines.insert(i + 1, "    if: false\n")
-                    i += 1
+                    # Check if next property line is already an 'if:'.
+                    if re.match(r"^    if:\s*", lines[j]):
+                        # Replace existing condition with false.
+                        lines[j] = "    if: false\n"
+                    else:
+                        # Insert if: false right after job name line.
+                        lines.insert(i + 1, "    if: false\n")
+                        i += 1
         i += 1
 
     WORKFLOW.write_text("".join(lines), encoding="utf-8")
