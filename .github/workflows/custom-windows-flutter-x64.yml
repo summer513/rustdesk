@@ -141,7 +141,6 @@ jobs:
           architecture: x64
 
       - name: Replace engine with rustdesk custom flutter engine
-        shell: bash
         run: |
           flutter doctor -v
           flutter precache --windows
